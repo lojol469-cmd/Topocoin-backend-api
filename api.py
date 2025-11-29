@@ -281,6 +281,19 @@ async def send_tpc(request: SendTpcRequest, current_user = Depends(get_current_u
     from_ata = get_associated_token_address(keypair.pubkey(), mint_pubkey)
     to_ata = get_associated_token_address(to_pubkey, mint_pubkey)
     
+    tx = Transaction()
+    
+    # Ensure to_ata exists
+    try:
+        client.get_account_info(to_ata)
+    except:
+        create_ata_ix = create_associated_token_account(
+            payer=keypair.pubkey(),
+            owner=to_pubkey,
+            mint=mint_pubkey
+        )
+        tx.add(create_ata_ix)
+    
     transfer_ix = spl_transfer(SplTransferParams(
         program_id=TOKEN_PROGRAM_ID,
         source=from_ata,
@@ -290,7 +303,7 @@ async def send_tpc(request: SendTpcRequest, current_user = Depends(get_current_u
         decimals=6
     ))
     
-    tx = Transaction().add(transfer_ix)
+    tx.add(transfer_ix)
     recent_blockhash = client.get_recent_blockhash().value.blockhash
     tx.recent_blockhash = recent_blockhash
     tx.sign(keypair)
@@ -312,6 +325,19 @@ async def mint_tpc(request: SendTpcRequest, current_user = Depends(get_current_u
     
     ata = get_associated_token_address(Pubkey.from_string(current_user["wallet_address"]), Pubkey.from_string(TOPOCOIN_MINT))
     
+    tx = Transaction()
+    
+    # Ensure ata exists
+    try:
+        client.get_account_info(ata)
+    except:
+        create_ata_ix = create_associated_token_account(
+            payer=authority_keypair.pubkey(),
+            owner=Pubkey.from_string(current_user["wallet_address"]),
+            mint=Pubkey.from_string(TOPOCOIN_MINT)
+        )
+        tx.add(create_ata_ix)
+    
     mint_ix = mint_to(MintToParams(
         TOKEN_PROGRAM_ID,
         Pubkey.from_string(TOPOCOIN_MINT),
@@ -321,7 +347,7 @@ async def mint_tpc(request: SendTpcRequest, current_user = Depends(get_current_u
         6
     ))
     
-    tx = Transaction().add(mint_ix)
+    tx.add(mint_ix)
     recent_blockhash = client.get_recent_blockhash().value.blockhash
     tx.recent_blockhash = recent_blockhash
     tx.sign(authority_keypair)
