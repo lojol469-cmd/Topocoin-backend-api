@@ -3,7 +3,7 @@ from pydantic import BaseModel, EmailStr
 from solana.rpc.api import Client
 from solders.keypair import Keypair
 from solders.pubkey import Pubkey
-from solders.transaction import Transaction
+from solders.transaction import Transaction, Message
 from solders.system_program import TransferParams, transfer
 from spl.token.instructions import transfer as spl_transfer, TransferParams as SplTransferParams, get_associated_token_address, create_associated_token_account, mint_to, MintToParams
 from spl.token.constants import TOKEN_PROGRAM_ID
@@ -272,10 +272,12 @@ async def send_sol(request: SendSolRequest, current_user = Depends(get_current_u
         to_pubkey=to_pubkey,
         lamports=int(request.amount * 1e9)
     ))
-    tx = Transaction().add(transfer_ix)
+    
+    instructions = [transfer_ix]
     recent_blockhash = client.get_recent_blockhash().value.blockhash
-    tx.recent_blockhash = recent_blockhash
-    tx.sign(keypair)
+    msg = Message.new(instructions)
+    tx = Transaction.new(from_keypairs=[keypair], message=msg, recent_blockhash=recent_blockhash)
+    
     result = client.send_transaction(tx)
     return {"signature": result.value}
 
@@ -289,7 +291,7 @@ async def send_tpc(request: SendTpcRequest, current_user = Depends(get_current_u
     from_ata = get_associated_token_address(keypair.pubkey(), mint_pubkey)
     to_ata = get_associated_token_address(to_pubkey, mint_pubkey)
     
-    tx = Transaction()
+    instructions = []
     
     # Ensure to_ata exists
     try:
@@ -300,7 +302,7 @@ async def send_tpc(request: SendTpcRequest, current_user = Depends(get_current_u
             owner=to_pubkey,
             mint=mint_pubkey
         )
-        tx.add(create_ata_ix)
+        instructions.append(create_ata_ix)
     
     transfer_ix = spl_transfer(SplTransferParams(
         program_id=TOKEN_PROGRAM_ID,
@@ -311,10 +313,11 @@ async def send_tpc(request: SendTpcRequest, current_user = Depends(get_current_u
         decimals=6
     ))
     
-    tx.add(transfer_ix)
+    instructions.append(transfer_ix)
     recent_blockhash = client.get_recent_blockhash().value.blockhash
-    tx.recent_blockhash = recent_blockhash
-    tx.sign(keypair)
+    msg = Message.new(instructions)
+    tx = Transaction.new(from_keypairs=[keypair], message=msg, recent_blockhash=recent_blockhash)
+    
     result = client.send_transaction(tx)
     return {"signature": result.value}
 
@@ -333,7 +336,7 @@ async def mint_tpc(request: SendTpcRequest, current_user = Depends(get_current_u
     
     ata = get_associated_token_address(Pubkey.from_string(current_user["wallet_address"]), Pubkey.from_string(TOPOCOIN_MINT))
     
-    tx = Transaction()
+    instructions = []
     
     # Ensure ata exists
     try:
@@ -344,7 +347,7 @@ async def mint_tpc(request: SendTpcRequest, current_user = Depends(get_current_u
             owner=Pubkey.from_string(current_user["wallet_address"]),
             mint=Pubkey.from_string(TOPOCOIN_MINT)
         )
-        tx.add(create_ata_ix)
+        instructions.append(create_ata_ix)
     
     mint_ix = mint_to(MintToParams(
         TOKEN_PROGRAM_ID,
@@ -355,10 +358,11 @@ async def mint_tpc(request: SendTpcRequest, current_user = Depends(get_current_u
         6
     ))
     
-    tx.add(mint_ix)
+    instructions.append(mint_ix)
     recent_blockhash = client.get_recent_blockhash().value.blockhash
-    tx.recent_blockhash = recent_blockhash
-    tx.sign(authority_keypair)
+    msg = Message.new(instructions)
+    tx = Transaction.new(from_keypairs=[authority_keypair], message=msg, recent_blockhash=recent_blockhash)
+    
     result = client.send_transaction(tx)
     return {"signature": result.value}
 
