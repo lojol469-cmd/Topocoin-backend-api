@@ -20,21 +20,8 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import secrets
 from dotenv import load_dotenv
 from mnemonic import Mnemonic
-from fastapi_mail import FastMail, MessageSchema, ConnectionConfig
 
 load_dotenv()
-
-# Email config
-conf = ConnectionConfig(
-    MAIL_USERNAME=os.getenv("MAIL_USERNAME"),
-    MAIL_PASSWORD=os.getenv("MAIL_PASSWORD"),
-    MAIL_FROM=os.getenv("MAIL_FROM"),
-    MAIL_PORT=int(os.getenv("MAIL_PORT", 587)),
-    MAIL_SERVER=os.getenv("MAIL_SERVER"),
-    MAIL_TLS=True,
-    MAIL_SSL=False
-)
-fm = FastMail(conf)
 
 app = FastAPI(title="Topocoin Wallet API", description="API for Topocoin Wallet operations with user management", version="1.0.0")
 
@@ -200,21 +187,12 @@ async def register(user: UserCreate):
     
     result = await db.users.insert_one(user_dict)
     
-    # Send email with recovery phrase
-    message = MessageSchema(
-        subject="Your Topocoin Wallet Recovery Phrase",
-        recipients=[user.email],
-        body=f"Your wallet address: {wallet_address}\n\nYour recovery phrase (12 words):\n{seed_phrase_encrypted}\n\nKeep this safe! Do not share it.",
-        subtype="plain"
-    )
-    await fm.send_message(message)
-    
     # Create access token
     access_token = create_access_token(
         data={"sub": user.email}, expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     )
     
-    return {"access_token": access_token, "token_type": "bearer", "seed_phrase": seed_phrase_encrypted if not user.seed_phrase_encrypted else None}
+    return {"access_token": access_token, "token_type": "bearer", "seed_phrase": seed_phrase_encrypted}
 
 @app.post("/api/auth/login", response_model=Token)
 async def login(user: UserLogin):
