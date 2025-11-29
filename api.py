@@ -24,6 +24,14 @@ from typing import Optional
 
 load_dotenv()
 
+# Logging environment variables for Render
+print("Environment variables loaded:")
+print(f"MONGO_URI: {'Loaded' if os.getenv('MONGO_URI') else 'Not loaded'}")
+print(f"MONGO_DB_NAME: {os.getenv('MONGO_DB_NAME')}")
+print(f"TOPOCOIN_MINT: {os.getenv('TOPOCOIN_MINT')}")
+print(f"MINT_AUTHORITY_KEYPAIR: {'Loaded' if os.getenv('MINT_AUTHORITY_KEYPAIR') else 'Not loaded'}")
+print(f"JWT_SECRET: {'Loaded' if os.getenv('JWT_SECRET') else 'Not loaded'}")
+
 app = FastAPI(title="Topocoin Wallet API", description="API for Topocoin Wallet operations with user management", version="1.0.0")
 
 # Database
