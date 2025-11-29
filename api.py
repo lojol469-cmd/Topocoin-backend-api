@@ -352,11 +352,11 @@ async def mint_tpc(request: SendTpcRequest, current_user = Depends(get_current_u
         instructions.append(create_ata_ix)
     
     mint_ix = mint_to(MintToParams(
+        int(request.amount * 10**6),
+        6,
         Pubkey.from_string(TOPOCOIN_MINT),
         ata,
         authority_keypair.pubkey(),
-        int(request.amount * 10**6),
-        6,
         []
     ))
     
