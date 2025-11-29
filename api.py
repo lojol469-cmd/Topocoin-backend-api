@@ -311,7 +311,8 @@ async def send_tpc(request: SendTpcRequest, current_user = Depends(get_current_u
         destination=to_ata,
         owner=keypair.pubkey(),
         amount=int(request.amount * 10**6),  # Assuming 6 decimals
-        decimals=6
+        decimals=6,
+        signers=[]
     ))
     
     instructions.append(transfer_ix)
@@ -351,12 +352,13 @@ async def mint_tpc(request: SendTpcRequest, current_user = Depends(get_current_u
         instructions.append(create_ata_ix)
     
     mint_ix = mint_to(MintToParams(
-        TOKEN_PROGRAM_ID,
-        Pubkey.from_string(TOPOCOIN_MINT),
-        ata,
-        authority_keypair.pubkey(),
-        int(request.amount * 10**6),
-        6
+        program_id=TOKEN_PROGRAM_ID,
+        mint=Pubkey.from_string(TOPOCOIN_MINT),
+        dest=ata,
+        authority=authority_keypair.pubkey(),
+        amount=int(request.amount * 10**6),
+        decimals=6,
+        signers=[]
     ))
     
     instructions.append(mint_ix)
