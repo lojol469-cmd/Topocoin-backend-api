@@ -1,0 +1,12 @@
+streamlit
+solana
+pillow
+fastapi
+uvicorn
+pydantic
+motor
+python-jose[cryptography]
+bcrypt
+passlib[bcrypt]
+python-multipart
+python-dotenv
