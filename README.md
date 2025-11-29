@@ -9,7 +9,9 @@ This is the Python FastAPI backend for Topocoin wallet.
    pip install -r requirements.txt
    ```
 
-2. Run the server:
+2. Create a `.env` file with your environment variables (see below).
+
+3. Run the server:
    ```bash
    python api.py
    ```
@@ -28,3 +30,5 @@ Create a `.env` file with:
 - MONGO_DB_NAME
 - JWT_SECRET
 - TOPOCOIN_MINT
+
+**Note**: The `.env` file is ignored by git for security. Do not commit sensitive information.
