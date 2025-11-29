@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, Depends, status
 from pydantic import BaseModel, EmailStr
-from solana.rpc.api import Client
+from solana.rpc.async_api import AsyncClient
 from solders.keypair import Keypair
 from solders.pubkey import Pubkey
 from solders.transaction import Transaction
@@ -130,7 +130,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
 def get_client(network: str):
     if network not in networks:
         raise HTTPException(status_code=400, detail="Invalid network")
-    return Client(networks[network])
+    return AsyncClient(networks[network])
 
 def load_keypair_from_user(user):
     if not user.get('seed_phrase_encrypted'):
@@ -250,13 +250,13 @@ async def get_balance(current_user = Depends(get_current_user)):
     wallet_address = current_user["wallet_address"]
     
     # SOL balance
-    sol_balance_resp = client.get_balance(Pubkey.from_string(wallet_address))
+    sol_balance_resp = await client.get_balance(Pubkey.from_string(wallet_address))
     sol_balance = sol_balance_resp.value / 1e9
     
     # TPC balance
     try:
         ata = get_associated_token_address(owner=Pubkey.from_string(wallet_address), mint=Pubkey.from_string(TOPOCOIN_MINT))
-        tpc_balance_resp = client.get_token_account_balance(ata)
+        tpc_balance_resp = await client.get_token_account_balance(ata)
         tpc_balance = tpc_balance_resp.value.ui_amount or 0
     except:
         tpc_balance = 0
@@ -275,12 +275,16 @@ async def send_sol(request: SendSolRequest, current_user = Depends(get_current_u
     ))
     
     instructions = [transfer_ix]
-    recent_blockhash = client.get_recent_blockhash().value.blockhash
-    msg = Message.new(instructions)
-    tx = Transaction.new(from_keypairs=[keypair], message=msg, recent_blockhash=recent_blockhash)
+    recent_blockhash = (await client.get_recent_blockhash()).value.blockhash
+    tx = Transaction.new_signed_with_payer(
+        instructions,
+        payer=keypair.pubkey(),
+        signers=[keypair],
+        recent_blockhash=recent_blockhash
+    )
     
-    result = client.send_transaction(tx)
-    return {"signature": result.value}
+    resp = await client.send_transaction(tx)
+    return {"signature": str(resp.value)}
 
 @app.post("/api/wallet/send_tpc")
 async def send_tpc(request: SendTpcRequest, current_user = Depends(get_current_user)):
@@ -295,9 +299,8 @@ async def send_tpc(request: SendTpcRequest, current_user = Depends(get_current_u
     instructions = []
     
     # Ensure to_ata exists
-    try:
-        client.get_account_info(to_ata)
-    except:
+    ata_info = await client.get_account_info(to_ata)
+    if ata_info.value is None:
         create_ata_ix = create_associated_token_account(
             payer=keypair.pubkey(),
             owner=to_pubkey,
@@ -316,12 +319,16 @@ async def send_tpc(request: SendTpcRequest, current_user = Depends(get_current_u
     ))
     
     instructions.append(transfer_ix)
-    recent_blockhash = client.get_recent_blockhash().value.blockhash
-    msg = Message.new(instructions)
-    tx = Transaction.new(from_keypairs=[keypair], message=msg, recent_blockhash=recent_blockhash)
+    recent_blockhash = (await client.get_recent_blockhash()).value.blockhash
+    tx = Transaction.new_signed_with_payer(
+        instructions,
+        payer=keypair.pubkey(),
+        signers=[keypair],
+        recent_blockhash=recent_blockhash
+    )
     
-    result = client.send_transaction(tx)
-    return {"signature": result.value}
+    resp = await client.send_transaction(tx)
+    return {"signature": str(resp.value)}
 
 @app.get("/wallets")
 def get_wallets():
@@ -336,37 +343,54 @@ async def mint_tpc(request: SendTpcRequest, current_user = Depends(get_current_u
     authority_keypair = Keypair.from_bytes(base64.b64decode(authority_b64))
     client = get_client("Devnet")
     
-    ata = get_associated_token_address(Pubkey.from_string(current_user["wallet_address"]), Pubkey.from_string(TOPOCOIN_MINT))
+    dest = Pubkey.from_string(current_user["wallet_address"])
+    
+    # 1️⃣ Calcul de l’ATA du destinataire
+    ata = get_associated_token_address(dest, Pubkey.from_string(TOPOCOIN_MINT))
+    
+    # 2️⃣ Vérifier si l’ATA existe
+    ata_info = await client.get_account_info(ata)
     
     instructions = []
     
-    # Ensure ata exists
-    try:
-        client.get_account_info(ata)
-    except:
-        create_ata_ix = create_associated_token_account(
-            payer=authority_keypair.pubkey(),
-            owner=Pubkey.from_string(current_user["wallet_address"]),
-            mint=Pubkey.from_string(TOPOCOIN_MINT)
+    if ata_info.value is None:
+        # 2a️⃣ Créer ATA si pas encore créé
+        instructions.append(
+            create_associated_token_account(
+                payer=authority_keypair.pubkey(),
+                owner=dest,
+                mint=Pubkey.from_string(TOPOCOIN_MINT)
+            )
         )
-        instructions.append(create_ata_ix)
     
-    mint_ix = mint_to(MintToParams(
-        amount=int(request.amount * 10**6),
-        decimals=6,
-        mint=Pubkey.from_string(TOPOCOIN_MINT),
-        dest=ata,
-        mint_authority=authority_keypair.pubkey(),
-        signers=[]
-    ))
+    # 3️⃣ Instruction de mint
+    instructions.append(
+        mint_to(
+            MintToParams(
+                program_id=TOKEN_PROGRAM_ID,
+                mint=Pubkey.from_string(TOPOCOIN_MINT),
+                dest=ata,
+                authority=authority_keypair.pubkey(),
+                amount=int(request.amount * 10**6)  # 6 décimales
+            )
+        )
+    )
     
-    instructions.append(mint_ix)
-    recent_blockhash = client.get_recent_blockhash().value.blockhash
-    msg = Message.new(instructions)
-    tx = Transaction.new(from_keypairs=[authority_keypair], message=msg, recent_blockhash=recent_blockhash)
+    # 4️⃣ Récupérer blockhash
+    recent_blockhash = (await client.get_latest_blockhash()).value.blockhash
     
-    result = client.send_transaction(tx)
-    return {"signature": result.value}
+    # 5️⃣ Construire transaction
+    tx = Transaction.new_signed_with_payer(
+        instructions,
+        payer=authority_keypair.pubkey(),
+        signers=[authority_keypair],
+        recent_blockhash=recent_blockhash
+    )
+    
+    # 6️⃣ Envoyer transaction
+    resp = await client.send_transaction(tx)
+    
+    return {"signature": str(resp.value)}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
