@@ -19,6 +19,7 @@ from passlib.context import CryptContext
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import secrets
 from dotenv import load_dotenv
+from typing import Optional
 
 load_dotenv()
 
@@ -41,8 +42,8 @@ security = HTTPBearer()
 class UserCreate(BaseModel):
     email: EmailStr
     password: str
-    wallet_address: str
-    seed_phrase_encrypted: str = None
+    wallet_address: Optional[str] = None
+    seed_phrase_encrypted: Optional[str] = None
 
 class UserLogin(BaseModel):
     email: EmailStr
