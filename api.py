@@ -19,9 +19,22 @@ from passlib.context import CryptContext
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import secrets
 from dotenv import load_dotenv
-from typing import Optional
+from mnemonic import Mnemonic
+from fastapi_mail import FastMail, MessageSchema, ConnectionConfig
 
 load_dotenv()
+
+# Email config
+conf = ConnectionConfig(
+    MAIL_USERNAME=os.getenv("MAIL_USERNAME"),
+    MAIL_PASSWORD=os.getenv("MAIL_PASSWORD"),
+    MAIL_FROM=os.getenv("MAIL_FROM"),
+    MAIL_PORT=int(os.getenv("MAIL_PORT", 587)),
+    MAIL_SERVER=os.getenv("MAIL_SERVER"),
+    MAIL_TLS=True,
+    MAIL_SSL=False
+)
+fm = FastMail(conf)
 
 app = FastAPI(title="Topocoin Wallet API", description="API for Topocoin Wallet operations with user management", version="1.0.0")
 
@@ -126,8 +139,15 @@ def load_keypair_from_user(user):
     if not user.get('seed_phrase_encrypted'):
         raise HTTPException(status_code=400, detail="No keypair stored for user")
     try:
-        secret_key = base64.b64decode(user['seed_phrase_encrypted'])
-        return Keypair.from_bytes(secret_key)
+        phrase = user['seed_phrase_encrypted']
+        if ' ' in phrase:  # It's mnemonic words
+            m = Mnemonic("english")
+            seed = m.to_seed(phrase)
+            keypair = Keypair.from_seed(seed[:32])
+        else:  # base64 encoded seed
+            seed = base64.b64decode(phrase)
+            keypair = Keypair.from_seed(seed[:32])
+        return keypair
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid keypair: {e}")
 
@@ -155,16 +175,19 @@ async def register(user: UserCreate):
     # Generate or use keypair
     if user.seed_phrase_encrypted:
         try:
-            secret_key = base64.b64decode(user.seed_phrase_encrypted)
-            keypair = Keypair.from_bytes(secret_key)
+            seed = base64.b64decode(user.seed_phrase_encrypted)
+            keypair = Keypair.from_seed(seed[:32])
             wallet_address = str(keypair.pubkey())
             seed_phrase_encrypted = user.seed_phrase_encrypted
         except:
             raise HTTPException(status_code=400, detail="Invalid seed_phrase_encrypted")
     else:
-        keypair = Keypair()
-        seed_phrase_encrypted = base64.b64encode(bytes(keypair)).decode()
+        m = Mnemonic("english")
+        words = m.generate(128)  # 12 words
+        seed = m.to_seed(words)
+        keypair = Keypair.from_seed(seed[:32])
         wallet_address = str(keypair.pubkey())
+        seed_phrase_encrypted = words  # Store the recovery phrase
     
     # Create user
     user_dict = {
@@ -176,6 +199,15 @@ async def register(user: UserCreate):
     }
     
     result = await db.users.insert_one(user_dict)
+    
+    # Send email with recovery phrase
+    message = MessageSchema(
+        subject="Your Topocoin Wallet Recovery Phrase",
+        recipients=[user.email],
+        body=f"Your wallet address: {wallet_address}\n\nYour recovery phrase (12 words):\n{seed_phrase_encrypted}\n\nKeep this safe! Do not share it.",
+        subtype="plain"
+    )
+    await fm.send_message(message)
     
     # Create access token
     access_token = create_access_token(
@@ -201,6 +233,22 @@ async def login(user: UserLogin):
 
 @app.get("/api/auth/me", response_model=User)
 async def read_users_me(current_user = Depends(get_current_user)):
+    # Ensure user has a wallet_address
+    if not current_user.get("wallet_address"):
+        # Generate new keypair
+        keypair = Keypair()
+        wallet_address = str(keypair.pubkey())
+        seed_phrase_encrypted = base64.b64encode(bytes(keypair)).decode()
+        
+        # Update user in DB
+        await db.users.update_one(
+            {"_id": current_user["_id"]},
+            {"$set": {"wallet_address": wallet_address, "seed_phrase_encrypted": seed_phrase_encrypted}}
+        )
+        
+        current_user["wallet_address"] = wallet_address
+        current_user["seed_phrase_encrypted"] = seed_phrase_encrypted
+    
     return {
         "id": str(current_user["_id"]),
         "email": current_user["email"],

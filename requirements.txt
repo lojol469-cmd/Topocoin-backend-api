@@ -10,3 +10,5 @@ bcrypt
 passlib[bcrypt]
 python-multipart
 python-dotenv
+mnemonic
+fastapi-mail
