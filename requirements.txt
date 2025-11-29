@@ -3,7 +3,7 @@ solana
 pillow
 fastapi
 uvicorn
-pydantic
+pydantic[email]
 motor
 python-jose[cryptography]
 bcrypt
