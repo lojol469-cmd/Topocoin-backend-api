@@ -3,7 +3,8 @@ from pydantic import BaseModel, EmailStr
 from solana.rpc.api import Client
 from solders.keypair import Keypair
 from solders.pubkey import Pubkey
-from solders.transaction import Transaction, Message
+from solders.transaction import Transaction
+from solders.message import Message
 from solders.system_program import TransferParams, transfer
 from spl.token.instructions import transfer as spl_transfer, TransferParams as SplTransferParams, get_associated_token_address, create_associated_token_account, mint_to, MintToParams
 from spl.token.constants import TOKEN_PROGRAM_ID
