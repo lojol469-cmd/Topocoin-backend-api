@@ -5,7 +5,7 @@ from solders.keypair import Keypair
 from solders.pubkey import Pubkey
 from solders.transaction import Transaction
 from solders.system_program import TransferParams, transfer
-from spl.token.instructions import transfer as spl_transfer, TransferParams as SplTransferParams, get_associated_token_address, create_associated_token_account
+from spl.token.instructions import transfer as spl_transfer, TransferParams as SplTransferParams, get_associated_token_address, create_associated_token_account, mint_to, MintToParams
 from spl.token.constants import TOKEN_PROGRAM_ID
 import json
 import os
@@ -20,6 +20,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import secrets
 from dotenv import load_dotenv
 from mnemonic import Mnemonic
+from typing import Optional
 
 load_dotenv()
 
