@@ -300,9 +300,32 @@ async def send_tpc(request: SendTpcRequest, current_user = Depends(get_current_u
 def get_wallets():
     return {"wallets": list(networks.keys())}
 
-@app.get("/networks")
-def get_networks():
-    return {"networks": list(networks.keys())}
+@app.post("/api/wallet/mint_tpc")
+async def mint_tpc(request: SendTpcRequest, current_user = Depends(get_current_user)):
+    authority_b64 = os.getenv("MINT_AUTHORITY_KEYPAIR")
+    if not authority_b64:
+        raise HTTPException(status_code=400, detail="Mint authority not configured")
+    
+    authority_keypair = Keypair.from_bytes(base64.b64decode(authority_b64))
+    client = get_client("Devnet")
+    
+    ata = get_associated_token_address(Pubkey.from_string(current_user["wallet_address"]), Pubkey.from_string(TOPOCOIN_MINT))
+    
+    mint_ix = mint_to(MintToParams(
+        TOKEN_PROGRAM_ID,
+        Pubkey.from_string(TOPOCOIN_MINT),
+        ata,
+        authority_keypair.pubkey(),
+        int(request.amount * 10**6),
+        6
+    ))
+    
+    tx = Transaction().add(mint_ix)
+    recent_blockhash = client.get_recent_blockhash().value.blockhash
+    tx.recent_blockhash = recent_blockhash
+    tx.sign(authority_keypair)
+    result = client.send_transaction(tx)
+    return {"signature": result.value}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
