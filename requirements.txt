@@ -9,3 +9,4 @@ passlib
 python-dotenv
 mnemonic
 bip-utils
+git+https://github.com/michaelhly/spl-token-py.git
