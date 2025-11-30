@@ -189,7 +189,7 @@ async def send_sol(req: SendRequest, user = Depends(get_current_user)):
         recent_blockhash = blockhash_resp.value.blockhash
         message = Message.new_with_blockhash([ix], keypair.pubkey(), recent_blockhash)
         tx = Transaction.new_unsigned(message)
-        tx.sign([keypair])
+        tx.sign([keypair], recent_blockhash=recent_blockhash)
         sig = await client.send_transaction(tx)
         return {"signature": str(sig.value)}
 
@@ -219,7 +219,7 @@ async def send_tpc(req: SendRequest, user = Depends(get_current_user)):
         recent_blockhash = blockhash_resp.value.blockhash
         message = Message.new_with_blockhash(instructions, from_pubkey, recent_blockhash)
         tx = Transaction.new_unsigned(message)
-        tx.sign([keypair])
+        tx.sign([keypair], recent_blockhash=recent_blockhash)
         sig = await client.send_transaction(tx)
         return {"signature": str(sig.value)}
 
@@ -246,7 +246,7 @@ async def mint_tpc(req: SendRequest, user = Depends(get_current_user)):
         recent_blockhash = blockhash_resp.value.blockhash
         message = Message.new_with_blockhash(instructions, authority.pubkey(), recent_blockhash)
         tx = Transaction.new_unsigned(message)
-        tx.sign([authority])
+        tx.sign([authority], recent_blockhash=recent_blockhash)
         sig = await client.send_transaction(tx)
         return {"signature": str(sig.value)}
 
