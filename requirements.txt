@@ -9,4 +9,3 @@ passlib
 python-dotenv
 mnemonic
 bip-utils
-spl-token
