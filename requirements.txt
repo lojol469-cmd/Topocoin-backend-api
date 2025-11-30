@@ -2,11 +2,10 @@ fastapi
 uvicorn
 solana>=0.34.0
 solders>=0.21.0
-spl-token>=0.3.0
+spl-token
 pydantic
 motor
 python-jose[cryptography]
 passlib[bcrypt]
 python-dotenv
-bip-utils
 mnemonic
