@@ -6,11 +6,11 @@ from solders.keypair import Keypair
 from solders.pubkey import Pubkey
 from solders.system_program import transfer, TransferParams  # ← CORRIGÉ
 from solders.message import Message
-from spl.token.constants import TOKEN_PROGRAM_ID  # ← SPL
-from spl.token.instructions import (  # ← SPL, nécessite spl-token
+from solana.token.constants import TOKEN_PROGRAM_ID
+from solana.token.instructions import (
     mint_to,
     MintToParams,
-    create_idempotent_associated_token_account,  # Idempotent (sûr)
+    create_associated_token_account_idempotent,
     get_associated_token_address,
     transfer_checked,
     TransferCheckedParams,
@@ -214,7 +214,7 @@ async def send_tpc(req: SendRequest, user = Depends(get_current_user)):
         to_ata = get_associated_token_address(to_pubkey, mint_pubkey)
 
         instructions = [
-            create_idempotent_associated_token_account(  # Idempotent pour to_ata
+            create_associated_token_account_idempotent(  # Idempotent pour to_ata
                 payer=from_pubkey,
                 owner=to_pubkey,
                 mint=mint_pubkey
@@ -255,7 +255,7 @@ async def mint_tpc(req: SendRequest, user = Depends(get_current_user)):
 
     async with get_solana_client() as client:
         instructions = [
-            create_idempotent_associated_token_account(
+            create_associated_token_account_idempotent(
                 payer=authority.pubkey(),
                 owner=dest,
                 mint=TOPOCOIN_MINT,
