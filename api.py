@@ -1,23 +1,21 @@
 from fastapi import FastAPI, HTTPException, Depends, status
 from pydantic import BaseModel, EmailStr
 from solana.rpc.async_api import AsyncClient
-from solders.transaction import Transaction
+from solana.transaction import Transaction
 from solders.keypair import Keypair
 from solders.pubkey import Pubkey
 from solders.system_program import transfer, TransferParams
 from solders.message import Message
-from solana.blockhash import Blockhash
-from spl.token.constants import TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID
+from spl.token.constants import TOKEN_PROGRAM_ID
 from spl.token.instructions import (
     mint_to,
     MintToParams,
-    create_idempotent_associated_token_account,  # <-- Nom correct !
+    create_idempotent_associated_token_account,
     get_associated_token_address,
-    transfer_checked,  # Pour transfer TPC (meilleur que spl_transfer pour checks)
+    transfer_checked,
     TransferCheckedParams,
 )
 from motor.motor_asyncio import AsyncIOMotorClient
-from bson import ObjectId
 from datetime import datetime, timedelta
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -31,42 +29,23 @@ from typing import Optional
 
 load_dotenv()
 
-# === Logging au démarrage (Render) ===
-print("Environment variables loaded:")
-for key in ["MONGO_URI", "MONGO_DB_NAME", "TOPOCOIN_MINT", "MINT_AUTHORITY_KEYPAIR", "JWT_SECRET"]:
-    value = os.getenv(key)
-    status = "Loaded" if value else "MISSING!"
-    if key in ["MONGO_URI", "MINT_AUTHORITY_KEYPAIR", "JWT_SECRET"]:
-        print(f"{key}: {status}")
-    else:
-        print(f"{key}: {value or 'Not set'}")
+app = FastAPI(title="Topocoin Wallet API", version="3.0.0")
 
-app = FastAPI(title="Topocoin Wallet API", version="2.1.0")
-
-# === MongoDB ===
+# === Config ===
 MONGO_URI = os.getenv("MONGO_URI")
 if not MONGO_URI:
-    raise RuntimeError("MONGO_URI is required")
-client = AsyncIOMotorClient(MONGO_URI)
-db = client[os.getenv("MONGO_DB_NAME", "topocoin")]
+    raise RuntimeError("MONGO_URI required")
+db = AsyncIOMotorClient(MONGO_URI)[os.getenv("MONGO_DB_NAME", "topocoin")]
 
-# === Security ===
 SECRET_KEY = os.getenv("JWT_SECRET")
 if not SECRET_KEY:
-    raise RuntimeError("JWT_SECRET is required")
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+    raise RuntimeError("JWT_SECRET required")
+
+TOPOCOIN_MINT = Pubkey.from_string(os.getenv("TOPOCOIN_MINT"))
+TOKEN_DECIMALS = 6
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 bearer_scheme = HTTPBearer()
 
-# === Constants ===
-TOPOCOIN_MINT_STR = os.getenv("TOPOCOIN_MINT")
-if not TOPOCOIN_MINT_STR:
-    raise RuntimeError("TOPOCOIN_MINT is required")
-TOPOCOIN_MINT = Pubkey.from_string(TOPOCOIN_MINT_STR)
-TOKEN_DECIMALS = 6  # Assume 6 decimals for TPC
-
-# === Solana Client ===
 def get_solana_client():
     return AsyncClient("https://api.devnet.solana.com")
 
@@ -88,34 +67,26 @@ class SendRequest(BaseModel):
     recipient: str
     amount: float
 
-# === Auth Helpers ===
+# === Auth ===
 def verify_password(plain: str, hashed: str) -> bool:
     return pwd_context.verify(plain, hashed)
 
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)
 
-def create_jwt(data: dict, expires_delta: timedelta = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)):
-    expire = datetime.utcnow() + expires_delta
-    to_encode = data.copy()
-    to_encode.update({"exp": expire})
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+def create_jwt(email: str):
+    return jwt.encode({"sub": email, "exp": datetime.utcnow() + timedelta(minutes=60)}, SECRET_KEY, algorithm="HS256")
 
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)):
+async def get_current_user(cred: HTTPAuthorizationCredentials = Depends(bearer_scheme)):
     try:
-        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
-        if not email:
-            raise HTTPException(status_code=401, detail="Invalid token")
-    except JWTError:
+        payload = jwt.decode(cred.credentials, SECRET_KEY, algorithms=["HS256"])
+        user = await db.users.find_one({"email": payload["sub"]})
+        if not user:
+            raise HTTPException(status_code=401)
+        return user
+    except:
         raise HTTPException(status_code=401, detail="Invalid token")
 
-    user = await db.users.find_one({"email": email})
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-    return user
-
-# === Keypair from user (mnemonic or raw seed) ===
 def load_user_keypair(user: dict) -> Keypair:
     encrypted = user.get("seed_phrase_encrypted")
     if not encrypted:
@@ -132,15 +103,11 @@ def load_user_keypair(user: dict) -> Keypair:
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid seed: {str(e)}")
 
-# === Mint Authority (server-side) ===
 def get_mint_authority() -> Keypair:
     b64 = os.getenv("MINT_AUTHORITY_KEYPAIR")
     if not b64:
-        raise HTTPException(status_code=500, detail="Mint authority not configured on server")
-    try:
-        return Keypair.from_bytes(base64.b64decode(b64))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Invalid MINT_AUTHORITY_KEYPAIR: {str(e)}")
+        raise HTTPException(500, detail="Mint authority missing")
+    return Keypair.from_bytes(base64.b64decode(b64))
 
 # === Endpoints ===
 
@@ -172,7 +139,7 @@ async def register(req: UserCreate):
         "created_at": datetime.utcnow()
     })
 
-    token = create_jwt({"sub": req.email})
+    token = create_jwt(req.email)
     return {"access_token": token}
 
 @app.post("/api/auth/login", response_model=Token)
@@ -181,7 +148,7 @@ async def login(req: UserLogin):
     if not user or not verify_password(req.password, user["hashed_password"]):
         raise HTTPException(status_code=400, detail="Incorrect email or password")
 
-    token = create_jwt({"sub": req.email})
+    token = create_jwt(req.email)
     return {"access_token": token}
 
 @app.get("/api/auth/me")
@@ -197,19 +164,12 @@ async def me(user = Depends(get_current_user)):
 async def balance(user = Depends(get_current_user)):
     async with get_solana_client() as client:
         pubkey = Pubkey.from_string(user["wallet_address"])
-
-        # SOL balance
-        resp = await client.get_balance(pubkey)
-        sol = float(resp.value) / 1e9
-
-        # TPC balance
+        sol = (await client.get_balance(pubkey)).value / 1e9
         ata = get_associated_token_address(pubkey, TOPOCOIN_MINT)
         try:
-            resp = await client.get_token_account_balance(ata)
-            tpc = resp.value.ui_amount or 0.0
-        except Exception:
-            tpc = 0.0
-
+            tpc = (await client.get_token_account_balance(ata)).value.ui_amount or 0
+        except:
+            tpc = 0
         return {"sol_balance": sol, "tpc_balance": tpc}
 
 @app.post("/api/wallet/send_sol")
@@ -229,11 +189,12 @@ async def send_sol(req: SendRequest, user = Depends(get_current_user)):
         ))
 
         blockhash_resp = await client.get_latest_blockhash()
-        recent_blockhash = Blockhash(blockhash_resp.value.blockhash)
+        recent_blockhash = blockhash_resp.value.blockhash
 
-        msg = Message.new_with_blockhash([ix], keypair.pubkey(), recent_blockhash)
-        tx = Transaction.new_unsigned(msg)
-        tx.sign([keypair], recent_blockhash)
+        tx = Transaction()
+        tx.message = Message.new_with_blockhash([ix], keypair.pubkey(), recent_blockhash)
+        tx.recent_blockhash = recent_blockhash
+        tx.sign([keypair])
 
         sig = await client.send_transaction(tx)
         return {"signature": str(sig.value)}
@@ -274,11 +235,12 @@ async def send_tpc(req: SendRequest, user = Depends(get_current_user)):
         instructions.append(ix)
 
         blockhash_resp = await client.get_latest_blockhash()
-        recent_blockhash = Blockhash(blockhash_resp.value.blockhash)
+        recent_blockhash = blockhash_resp.value.blockhash
 
-        msg = Message.new_with_blockhash(instructions, from_pubkey, recent_blockhash)
-        tx = Transaction.new_unsigned(msg)
-        tx.sign([keypair], recent_blockhash)
+        tx = Transaction()
+        tx.message = Message.new_with_blockhash(instructions, from_pubkey, recent_blockhash)
+        tx.recent_blockhash = recent_blockhash
+        tx.sign([keypair])
 
         sig = await client.send_transaction(tx)
         return {"signature": str(sig.value)}
@@ -286,65 +248,47 @@ async def send_tpc(req: SendRequest, user = Depends(get_current_user)):
 @app.post("/api/wallet/mint_tpc")
 async def mint_tpc(req: SendRequest, user = Depends(get_current_user)):
     if req.amount <= 0:
-        raise HTTPException(status_code=400, detail="Amount must be positive")
+        raise HTTPException(400, detail="Invalid amount")
 
-    authority_kp = get_mint_authority()
-    dest_pubkey = Pubkey.from_string(user["wallet_address"])
-    amount_ui = int(req.amount * (10 ** TOKEN_DECIMALS))
+    authority = get_mint_authority()
+    dest = Pubkey.from_string(user["wallet_address"])
+    amount = int(req.amount * 10**TOKEN_DECIMALS)
+    ata = get_associated_token_address(dest, TOPOCOIN_MINT)
 
     async with get_solana_client() as client:
-        ata = get_associated_token_address(dest_pubkey, TOPOCOIN_MINT)
-
-        # Instructions
         instructions = [
-            # ATA idempotent (ne plante jamais)
             create_idempotent_associated_token_account(
-                payer=authority_kp.pubkey(),
-                owner=dest_pubkey,
+                payer=authority.pubkey(),
+                owner=dest,
                 mint=TOPOCOIN_MINT,
             ),
-            # Mint
-            mint_to(
-                MintToParams(
-                    program_id=TOKEN_PROGRAM_ID,
-                    mint=TOPOCOIN_MINT,
-                    dest=ata,
-                    mint_authority=authority_kp.pubkey(),
-                    amount=amount_ui,
-                )
-            ),
+            mint_to(MintToParams(
+                program_id=TOKEN_PROGRAM_ID,
+                mint=TOPOCOIN_MINT,
+                dest=ata,
+                mint_authority=authority.pubkey(),
+                amount=amount,
+            )),
         ]
 
-        # Récupère le dernier blockhash
+        # Blockhash
         blockhash_resp = await client.get_latest_blockhash()
-        recent_blockhash = Blockhash(blockhash_resp.value.blockhash)
+        recent_blockhash = blockhash_resp.value.blockhash
 
-        # Construire le message avec blockhash intégré
-        message = Message.new_with_blockhash(
-            instructions=instructions,
-            payer=authority_kp.pubkey(),
-            blockhash=recent_blockhash,
-        )
+        # Transaction
+        tx = Transaction()
+        tx.message = Message.new_with_blockhash(instructions, authority.pubkey(), recent_blockhash)
+        tx.recent_blockhash = recent_blockhash
+        tx.sign([authority])  # ← SEULEMENT LES SIGNERS ICI !
 
-        # Créer la transaction
-        transaction = Transaction()
-        transaction.message = message
-
-        # SIGNATURE CORRECTE (c'est ici qu'on passe le blockhash !)
-        transaction.sign([authority_kp], recent_blockhash)
-
-        # Envoyer
         try:
-            sig = await client.send_transaction(transaction)
+            sig = await client.send_transaction(tx)
             return {"signature": str(sig.value)}
         except Exception as e:
-            error_msg = str(e)
-            if "AccountNotFound" in error_msg:
-                error_msg = "Mint authority account not found or no SOL to pay fees"
-            elif "invalid account data" in error_msg:
-                error_msg = "Mint authority is not the real mint authority"
-            raise HTTPException(status_code=500, detail=f"Mint failed: {error_msg}")
+            raise HTTPException(500, detail=f"Mint failed: {str(e)}")
+
+# Garde tes autres routes (login, register, send_sol, send_tpc) identiques
+# (elles marchent déjà avec cette méthode)
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 8000))
-    uvicorn.run("api:app", host="0.0.0.0", port=port, reload=False)  # Assume fichier s'appelle api.py
+    uvicorn.run("api:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
