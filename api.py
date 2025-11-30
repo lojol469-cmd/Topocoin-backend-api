@@ -6,6 +6,7 @@ from solders.keypair import Keypair
 from solders.pubkey import Pubkey
 from solders.system_program import transfer, TransferParams
 from solders.message import Message
+from solana.blockhash import Blockhash
 from spl.token.constants import TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID
 from spl.token.instructions import (
     mint_to,
@@ -228,11 +229,11 @@ async def send_sol(req: SendRequest, user = Depends(get_current_user)):
         ))
 
         blockhash_resp = await client.get_latest_blockhash()
-        recent_blockhash = blockhash_resp.value.blockhash
+        recent_blockhash = Blockhash(blockhash_resp.value.blockhash)
 
         msg = Message.new_with_blockhash([ix], keypair.pubkey(), recent_blockhash)
         tx = Transaction.new_unsigned(msg)
-        tx.sign([keypair])
+        tx.sign([keypair], recent_blockhash)
 
         sig = await client.send_transaction(tx)
         return {"signature": str(sig.value)}
@@ -273,11 +274,11 @@ async def send_tpc(req: SendRequest, user = Depends(get_current_user)):
         instructions.append(ix)
 
         blockhash_resp = await client.get_latest_blockhash()
-        recent_blockhash = blockhash_resp.value.blockhash
+        recent_blockhash = Blockhash(blockhash_resp.value.blockhash)
 
         msg = Message.new_with_blockhash(instructions, from_pubkey, recent_blockhash)
         tx = Transaction.new_unsigned(msg)
-        tx.sign([keypair])
+        tx.sign([keypair], recent_blockhash)
 
         sig = await client.send_transaction(tx)
         return {"signature": str(sig.value)}
@@ -289,40 +290,60 @@ async def mint_tpc(req: SendRequest, user = Depends(get_current_user)):
 
     authority_kp = get_mint_authority()
     dest_pubkey = Pubkey.from_string(user["wallet_address"])
-    amount = int(req.amount * (10 ** TOKEN_DECIMALS))
+    amount_ui = int(req.amount * (10 ** TOKEN_DECIMALS))
 
     async with get_solana_client() as client:
         ata = get_associated_token_address(dest_pubkey, TOPOCOIN_MINT)
 
+        # Instructions
         instructions = [
-            create_idempotent_associated_token_account(  # Idempotent pour l'ATA du user
+            # ATA idempotent (ne plante jamais)
+            create_idempotent_associated_token_account(
                 payer=authority_kp.pubkey(),
                 owner=dest_pubkey,
-                mint=TOPOCOIN_MINT
-            )
+                mint=TOPOCOIN_MINT,
+            ),
+            # Mint
+            mint_to(
+                MintToParams(
+                    program_id=TOKEN_PROGRAM_ID,
+                    mint=TOPOCOIN_MINT,
+                    dest=ata,
+                    mint_authority=authority_kp.pubkey(),
+                    amount=amount_ui,
+                )
+            ),
         ]
 
-        ix = mint_to(MintToParams(
-            program_id=TOKEN_PROGRAM_ID,
-            mint=TOPOCOIN_MINT,
-            dest=ata,
-            mint_authority=authority_kp.pubkey(),  # <-- Correct !
-            amount=amount
-        ))
-        instructions.append(ix)
-
+        # Récupère le dernier blockhash
         blockhash_resp = await client.get_latest_blockhash()
-        recent_blockhash = blockhash_resp.value.blockhash
+        recent_blockhash = Blockhash(blockhash_resp.value.blockhash)
 
-        msg = Message.new_with_blockhash(instructions, authority_kp.pubkey(), recent_blockhash)
-        tx = Transaction.new_unsigned(msg)
-        tx.sign([authority_kp])
+        # Construire le message avec blockhash intégré
+        message = Message.new_with_blockhash(
+            instructions=instructions,
+            payer=authority_kp.pubkey(),
+            blockhash=recent_blockhash,
+        )
 
+        # Créer la transaction
+        transaction = Transaction()
+        transaction.message = message
+
+        # SIGNATURE CORRECTE (c'est ici qu'on passe le blockhash !)
+        transaction.sign([authority_kp], recent_blockhash)
+
+        # Envoyer
         try:
-            sig = await client.send_transaction(tx)
+            sig = await client.send_transaction(transaction)
             return {"signature": str(sig.value)}
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Mint failed: {str(e)}")
+            error_msg = str(e)
+            if "AccountNotFound" in error_msg:
+                error_msg = "Mint authority account not found or no SOL to pay fees"
+            elif "invalid account data" in error_msg:
+                error_msg = "Mint authority is not the real mint authority"
+            raise HTTPException(status_code=500, detail=f"Mint failed: {error_msg}")
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
