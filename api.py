@@ -46,7 +46,7 @@ TOKEN_DECIMALS = 6
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 bearer_scheme = HTTPBearer()
 
-def get_solana_client():
+async def get_solana_client():
     return AsyncClient("https://api.devnet.solana.com")
 
 # === Models ===
@@ -162,7 +162,7 @@ async def me(user = Depends(get_current_user)):
 
 @app.get("/api/wallet/balance")
 async def balance(user = Depends(get_current_user)):
-    async with get_solana_client() as client:
+    async with await get_solana_client() as client:
         pubkey = Pubkey.from_string(user["wallet_address"])
         sol = (await client.get_balance(pubkey)).value / 1e9
         ata = get_associated_token_address(pubkey, TOPOCOIN_MINT)
@@ -181,7 +181,7 @@ async def send_sol(req: SendRequest, user = Depends(get_current_user)):
     to_pubkey = Pubkey.from_string(req.recipient)
     lamports = int(req.amount * 1e9)
 
-    async with get_solana_client() as client:
+    async with await get_solana_client() as client:
         ix = transfer(TransferParams(
             from_pubkey=keypair.pubkey(),
             to_pubkey=to_pubkey,
@@ -209,7 +209,7 @@ async def send_tpc(req: SendRequest, user = Depends(get_current_user)):
     mint_pubkey = TOPOCOIN_MINT
     amount = int(req.amount * (10 ** TOKEN_DECIMALS))
 
-    async with get_solana_client() as client:
+    async with await get_solana_client() as client:
         from_ata = get_associated_token_address(from_pubkey, mint_pubkey)
         to_ata = get_associated_token_address(to_pubkey, mint_pubkey)
 
@@ -253,7 +253,7 @@ async def mint_tpc(req: SendRequest, user = Depends(get_current_user)):
     amount = int(req.amount * 10**TOKEN_DECIMALS)
     ata = get_associated_token_address(dest, TOPOCOIN_MINT)
 
-    async with get_solana_client() as client:
+    async with await get_solana_client() as client:
         instructions = [
             create_associated_token_account_idempotent(
                 payer=authority.pubkey(),
