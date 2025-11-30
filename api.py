@@ -148,16 +148,6 @@ def load_keypair_from_user(user):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid keypair: {e}")
 
-def get_decimals(client: Client):
-    try:
-        mint_info = client.get_account_info(Pubkey.from_string(TOPOCOIN_MINT))
-        if mint_info.value and mint_info.value.data:
-            data = mint_info.value.data
-            return data[44] if len(data) > 44 else 6
-        return 6
-    except:
-        return 6
-
 # User endpoints
 @app.post("/api/auth/register", response_model=Token)
 async def register(user: UserCreate):
