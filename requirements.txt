@@ -2,6 +2,7 @@ fastapi
 uvicorn
 solana
 solders
+solana-token
 pydantic
 motor
 python-jose
