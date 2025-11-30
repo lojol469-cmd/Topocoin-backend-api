@@ -11,6 +11,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     && rm -rf /var/lib/apt/lists/*
 
+# Configurer git pour éviter les prompts d'authentification
+RUN git config --global user.name "builder" && git config --global user.email "builder@example.com"
+
 WORKDIR /app
 
 # Copier requirements.txt en premier pour profiter du cache Docker
