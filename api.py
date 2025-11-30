@@ -28,7 +28,7 @@ from typing import Optional
 
 load_dotenv()
 
-app = FastAPI(title="Topocoin Wallet API", version="3.0.0")
+app = FastAPI(title="Topocoin Wallet API", version="3.0.0")  # Updated for Render deploy
 
 # === Config ===
 MONGO_URI = os.getenv("MONGO_URI")
