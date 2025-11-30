@@ -2,6 +2,7 @@ fastapi
 uvicorn[standard]
 solana>=0.34.0
 solders>=0.21.0
+spl-token>=0.3.0
 pydantic>=2.0
 motor
 python-jose[cryptography]

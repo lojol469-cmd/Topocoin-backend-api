@@ -1,16 +1,16 @@
 from fastapi import FastAPI, HTTPException, Depends, status
 from pydantic import BaseModel, EmailStr
 from solana.rpc.async_api import AsyncClient
-from solana.transaction import Transaction
+from solders.transaction import Transaction  # ← CORRIGÉ
 from solders.keypair import Keypair
 from solders.pubkey import Pubkey
-from solana.system_program import transfer, TransferParams
+from solders.system_program import transfer, TransferParams  # ← CORRIGÉ
 from solders.message import Message
-from solana.token.constants import TOKEN_PROGRAM_ID
-from solana.token.instructions import (
+from spl.token.constants import TOKEN_PROGRAM_ID  # ← SPL
+from spl.token.instructions import (  # ← SPL, nécessite spl-token
     mint_to,
     MintToParams,
-    create_associated_token_account_idempotent,
+    create_idempotent_associated_token_account,  # Idempotent (sûr)
     get_associated_token_address,
     transfer_checked,
     TransferCheckedParams,
@@ -191,9 +191,8 @@ async def send_sol(req: SendRequest, user = Depends(get_current_user)):
         blockhash_resp = await client.get_latest_blockhash()
         recent_blockhash = blockhash_resp.value.blockhash
 
-        tx = Transaction()
-        tx.message = Message.new_with_blockhash([ix], keypair.pubkey(), recent_blockhash)
-        tx.recent_blockhash = recent_blockhash
+        message = Message.new_with_blockhash([ix], keypair.pubkey(), recent_blockhash)
+        tx = Transaction.new_unsigned(message)
         tx.sign([keypair])
 
         sig = await client.send_transaction(tx)
@@ -215,7 +214,7 @@ async def send_tpc(req: SendRequest, user = Depends(get_current_user)):
         to_ata = get_associated_token_address(to_pubkey, mint_pubkey)
 
         instructions = [
-            create_associated_token_account_idempotent(  # Idempotent pour to_ata
+            create_idempotent_associated_token_account(  # Idempotent pour to_ata
                 payer=from_pubkey,
                 owner=to_pubkey,
                 mint=mint_pubkey
@@ -237,9 +236,8 @@ async def send_tpc(req: SendRequest, user = Depends(get_current_user)):
         blockhash_resp = await client.get_latest_blockhash()
         recent_blockhash = blockhash_resp.value.blockhash
 
-        tx = Transaction()
-        tx.message = Message.new_with_blockhash(instructions, from_pubkey, recent_blockhash)
-        tx.recent_blockhash = recent_blockhash
+        message = Message.new_with_blockhash(instructions, from_pubkey, recent_blockhash)
+        tx = Transaction.new_unsigned(message)
         tx.sign([keypair])
 
         sig = await client.send_transaction(tx)
@@ -257,7 +255,7 @@ async def mint_tpc(req: SendRequest, user = Depends(get_current_user)):
 
     async with get_solana_client() as client:
         instructions = [
-            create_associated_token_account_idempotent(
+            create_idempotent_associated_token_account(
                 payer=authority.pubkey(),
                 owner=dest,
                 mint=TOPOCOIN_MINT,
@@ -267,19 +265,18 @@ async def mint_tpc(req: SendRequest, user = Depends(get_current_user)):
                 mint=TOPOCOIN_MINT,
                 dest=ata,
                 mint_authority=authority.pubkey(),
-                amount=amount,
-            )),
+                amount=amount
+            ))
         ]
 
         # Blockhash
         blockhash_resp = await client.get_latest_blockhash()
         recent_blockhash = blockhash_resp.value.blockhash
 
-        # Transaction
-        tx = Transaction()
-        tx.message = Message.new_with_blockhash(instructions, authority.pubkey(), recent_blockhash)
-        tx.recent_blockhash = recent_blockhash
-        tx.sign([authority])  # ← SEULEMENT LES SIGNERS ICI !
+        # Construction TX corrigée
+        message = Message.new_with_blockhash(instructions, authority.pubkey(), recent_blockhash)
+        tx = Transaction.new_unsigned(message)
+        tx.sign([authority])  # Seulement les signers
 
         try:
             sig = await client.send_transaction(tx)
