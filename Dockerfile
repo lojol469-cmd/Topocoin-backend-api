@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 FROM python:3.11-slim
 
-# Installe gcc + outils de build (obligatoire pour solders/ed25519-blake2b)
+# Installer git et les dépendances de build pour solders et spl-token-py
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     gcc \
@@ -13,12 +13,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Copie requirements d'abord (cache)
+# Copier requirements.txt en premier pour profiter du cache Docker
 COPY requirements.txt .
+
+# Mettre à jour pip et installer les dépendances
 RUN pip install --no-cache-dir --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copie le code
+# Copier le reste du code
 COPY . .
 
 EXPOSE 8000
