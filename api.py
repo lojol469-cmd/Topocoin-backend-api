@@ -6,8 +6,8 @@ from solders.keypair import Keypair
 from solders.pubkey import Pubkey
 from solders.system_program import transfer, TransferParams  # ← CORRIGÉ
 from solders.message import Message
-from solana_spl.token.constants import TOKEN_PROGRAM_ID
-from solana_spl.token.instructions import (
+from spl.token.constants import TOKEN_PROGRAM_ID
+from spl.token.instructions import (
     mint_to,
     MintToParams,
     create_associated_token_account_idempotent,

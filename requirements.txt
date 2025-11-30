@@ -2,7 +2,7 @@ fastapi
 uvicorn
 solana
 solders
-solana-spl
+spl
 pydantic
 motor
 python-jose
