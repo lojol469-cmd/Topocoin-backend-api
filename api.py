@@ -66,7 +66,7 @@ TOPOCOIN_MINT = Pubkey.from_string(TOPOCOIN_MINT_STR)
 TOKEN_DECIMALS = 6  # Assume 6 decimals for TPC
 
 # === Solana Client ===
-async def get_solana_client():
+def get_solana_client():
     return AsyncClient("https://api.devnet.solana.com")
 
 # === Models ===
