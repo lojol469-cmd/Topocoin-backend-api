@@ -1,8 +1,7 @@
 from fastapi import FastAPI, HTTPException, Depends, status
 from pydantic import BaseModel, EmailStr
 from solana.rpc.async_api import AsyncClient
-from solana.transaction import Transaction
-from solana.blockhash import Blockhash
+from solders.transaction import Transaction
 from solders.keypair import Keypair
 from solders.pubkey import Pubkey
 from solders.system_program import transfer, TransferParams
