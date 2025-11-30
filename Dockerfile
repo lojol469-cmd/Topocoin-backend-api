@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 FROM python:3.11-slim
 
-# Installer git, curl, unzip et les dépendances de build pour solders
+# Installer git, curl et les dépendances de build pour solders
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     gcc \
@@ -10,24 +10,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-dev \
     git \
     curl \
-    unzip \
     && rm -rf /var/lib/apt/lists/*
 
 # Configurer git pour éviter les prompts d'authentification
 RUN git config --global user.name "builder" && git config --global user.email "builder@example.com"
+ENV GIT_ASKPASS=/bin/true
+ENV GIT_TERMINAL_PROMPT=0
 
 WORKDIR /app
 
 # Copier requirements.txt en premier pour profiter du cache Docker
 COPY requirements.txt .
 
-# Télécharger et installer spl-token-py depuis GitHub
-RUN curl -L https://github.com/michaelhly/spl-token-py/archive/refs/heads/main.zip -o /tmp/spl-token-py.zip && \
-    unzip /tmp/spl-token-py.zip -d /tmp && \
-    pip install /tmp/spl-token-py-main && \
-    rm -rf /tmp/spl-token-py.zip /tmp/spl-token-py-main
+# Télécharger et installer solana-py avec spl
+RUN git clone --depth 1 https://github.com/michaelhly/solana-py.git /tmp/solana-py && \
+    pip install /tmp/solana-py && \
+    rm -rf /tmp/solana-py
 
-# Mettre à jour pip et installer les dépendances
+# Mettre à jour pip et installer les autres dépendances
 RUN pip install --no-cache-dir --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
